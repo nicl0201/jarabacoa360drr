@@ -246,6 +246,7 @@ function manageListings(){setSection("all");toast("Puedes editar, aprobar o elim
 function manageCategories(){if(!admin)return;const action=prompt("Escribe el grupo: servicios, solares, villas_venta o villas_renta o turismo");if(!action||!categories[action])return toast("Grupo no válido");const name=prompt("Nombre de la nueva categoría:");if(!name)return;categories[action].push(name);persist();render();toast("Categoría agregada")}
 document.querySelectorAll(".nav a").forEach(a=>a.addEventListener("click",e=>{e.preventDefault();document.getElementById("nav").classList.remove("open");setSection(a.dataset.section)}));
 document.querySelectorAll(".modal-backdrop").forEach(m=>m.addEventListener("click",e=>{if(e.target===m)closeModal(m.id)}));document.addEventListener("keydown",e=>{if(e.key==="Escape")document.querySelectorAll(".modal-backdrop.show").forEach(m=>closeModal(m.id))});document.getElementById("year").textContent=new Date().getFullYear();
+let verifiedServices=new Set();
 fillCategories();renderPopular();render();
 
 const db=window.supabase?.createClient('https://zsogwuzzouucjsrathop.supabase.co','sb_publishable_OKO0kriAwknYmjY_3UF5ig_Gvfrk7z4');
@@ -289,7 +290,7 @@ const portfolioOpen=openListingForm;openListingForm=function(){portfolioOpen();p
 const portfolioEdit=editListing;editListing=async function(id){await portfolioEdit(id);if(editingId===id)portfolioReset(listings.find(x=>x.id===id)?.portfolio||[])};
 const portfolioDetails=showDetails;showDetails=async function(id){await portfolioDetails(id);if(verifiedServices.has(id)){const b=document.createElement('span');b.innerHTML=verifiedBadge();detailTitle.append(b)}const x=listings.find(z=>z.id===id);if(!x||x.type!=='servicios'||!x.portfolio?.length)return;const section=document.createElement('section');const h=document.createElement('h3');h.textContent='Trabajos realizados';section.append(h);for(const p of x.portfolio){const card=document.createElement('article');card.style.cssText='border:1px solid #ddd;border-radius:10px;padding:12px;margin:12px 0';if(p.image){const im=document.createElement('img');im.src=p.image;im.loading='lazy';im.alt=p.title||'Trabajo realizado';im.style.cssText='width:100%;max-height:320px;object-fit:contain;border-radius:8px';card.append(im)}const t=document.createElement('h4');t.textContent=p.title;const d=document.createElement('p');d.textContent=p.description;card.append(t,d);section.append(card)}detailContent.append(section)};
 
-let verifiedServices=new Set();
+
 function verifiedBadge(){return '<span style="color:#1677ef;font-size:16px" title="Verificado por la administración" aria-label="Verificado por la administración"> ●✓ </span>'}
 async function toggleServiceVerification(id){if(!admin)return;const exists=verifiedServices.has(id);const r=exists?await db.from('j360_verified_services').delete().eq('listing_id',id):await db.from('j360_verified_services').insert({listing_id:id});if(r.error)return err(r.error);await refresh();toast(exists?'Verificación retirada':'Profesional verificado')}
 j360Stats();
