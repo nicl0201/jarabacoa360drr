@@ -117,7 +117,7 @@ header{height:76px;background:#fff;border-bottom:1px solid #edf0ee;position:stic
  </div>
 </header>
 
-<div class="admin-panel" id="adminBar"><div class="wrap admin-tools"><span class="admin-title">⚙ Panel de administración</span><button class="btn btn-light" onclick="openListingForm()">+ Nueva publicación</button><button id="j360AdminUsers" hidden class="btn btn-light" onclick="j360Users()">Usuarios y permisos</button><span id="j360Permission"></span><button class="btn btn-light" onclick="manageCategories()">Categorías</button><button class="btn btn-light" onclick="manageListings()">Publicaciones</button><button class="btn btn-light" onclick="logout()">Cerrar sesión</button></div></div>
+<div class="admin-panel" id="adminBar"><div class="wrap admin-tools"><span class="admin-title">⚙ Panel de administración</span><button class="btn btn-light" onclick="openListingForm()">+ Nueva publicación</button><button id="billingButton" hidden class="btn btn-light" onclick="openBillingPanel()">Planes y vencimientos</button><button id="j360AdminUsers" hidden class="btn btn-light" onclick="j360Users()">Usuarios y permisos</button><span id="j360Permission"></span><button class="btn btn-light" onclick="manageCategories()">Categorías</button><button class="btn btn-light" onclick="manageListings()">Publicaciones</button><button class="btn btn-light" onclick="logout()">Cerrar sesión</button></div></div>
 
 <section class="hero">
  <div class="wrap hero-inner">
@@ -278,7 +278,7 @@ if(db){db.auth.onAuthStateChange((event,session)=>{setTimeout(async()=>{if(event
 let publishAllowed=false;
 async function j360Stats(){if(!db)return;const r=await db.rpc('j360_stats');if(r.error)return;const s=r.data;document.getElementById('statListings').textContent=s.listings;document.getElementById('statUsers').textContent=s.users;document.getElementById('statAverage').textContent=s.average==null?'Sin votos':s.average+'/5';document.getElementById('statRatings').textContent=s.ratings;}
 const prevStats=updateStats;let statsPending=false,statsLast=0;updateStats=function(){prevStats();if(!statsPending&&Date.now()-statsLast>60000){statsPending=true;statsLast=Date.now();j360Stats().finally(()=>{statsPending=false})}};
-const prevSession=sessionChanged;sessionChanged=async function(session){publishAllowed=false;await prevSession(session);if(profile){const r=await db.rpc('j360_can_publish');publishAllowed=r.data===true;}document.getElementById('j360AdminUsers').hidden=!admin;document.querySelector('[onclick="manageListings()"]').hidden=!admin;document.getElementById('j360Permission').textContent=profile&&!admin?(publishAllowed?'Puedes enviar publicaciones':'Publicación pendiente de autorización'):'';};
+const prevSession=sessionChanged;sessionChanged=async function(session){publishAllowed=false;await prevSession(session);if(profile){const r=await db.rpc('j360_can_publish');publishAllowed=r.data===true;}document.getElementById('billingButton').hidden=!admin;document.getElementById('j360AdminUsers').hidden=!admin;document.querySelector('[onclick="manageListings()"]').hidden=!admin;document.getElementById('j360Permission').textContent=profile&&!admin?(publishAllowed?'Puedes enviar publicaciones':'Publicación pendiente de autorización'):'';};
 const prevOpenListing=openListingForm;openListingForm=function(){if(!profile)return openModal('loginModal');if(!publishAllowed&&!admin)return toast('El administrador debe autorizar tu cuenta para publicar');prevOpenListing()};
 publishStart=function(){if(!profile)return openModal('loginModal');openListingForm()};
 const prevSave=saveListing;saveListing=async function(){if(!admin&&!publishAllowed)return toast('No tienes permiso para publicar');await prevSave()};
@@ -312,6 +312,49 @@ let j360NoticeBusy=false;
 async function j360NoticeRefresh(open=false){const button=document.getElementById("j360NoticeButton");button.hidden=!profile;if(!profile||!db||j360NoticeBusy)return;j360NoticeBusy=true;try{const uid=profile.id;const q=await db.from("j360_listings").select("id,status,data,owner").eq("owner",uid);if(q.error)throw q.error;const rows=q.data||[];const notices=rows.filter(x=>["published","rejected"].includes(x.status)).map(x=>({key:x.id+":"+x.status,text:(x.data?.name||"Publicación")+" · "+(x.status==="published"?"Aprobada":"Rechazada")}));if(admin){const p=await db.from("j360_listings").select("id,data").eq("status","pending");if(!p.error)for(const x of p.data||[])notices.push({key:"pending:"+x.id,text:"Pendiente de aprobación: "+(x.data?.name||"Publicación")});const u=await db.rpc("j360_users");if(!u.error)for(const x of u.data||[])if(!x.allowed&&!x.suspended)notices.push({key:"user:"+x.id,text:"Usuario pendiente de autorización: "+x.email})}if(profile?.id!==uid)return;let seen=[];try{seen=JSON.parse(localStorage.getItem("j360NoticeSeen:"+uid)||"[]")}catch{}const unread=notices.filter(x=>!seen.includes(x.key)).length;button.textContent="🔔 Avisos"+(unread?" ("+unread+")":"");if(open){const box=document.getElementById("j360NoticeList");box.replaceChildren();for(const x of notices){const p=document.createElement("p");p.textContent=x.text;box.append(p)}if(!notices.length)box.textContent="No tienes avisos por ahora.";try{localStorage.setItem("j360NoticeSeen:"+uid,JSON.stringify(notices.map(x=>x.key)))}catch{}button.textContent="🔔 Avisos"}}catch(e){if(open)document.getElementById("j360NoticeList").textContent="No se pudieron cargar los avisos. Intenta nuevamente."}finally{j360NoticeBusy=false}}
 function j360Notices(){openModal("j360NoticeModal");j360NoticeRefresh(true)}
 window.addEventListener("load",()=>{j360NoticeRefresh();setInterval(j360NoticeRefresh,20000)});
-</script></body>
+</script><div class="modal-backdrop" id="billingModal"><div class="modal" role="dialog" aria-labelledby="billingTitle"><div class="modal-head"><h2 id="billingTitle">Planes y vencimientos</h2><button class="btn btn-light" onclick="closeModal('billingModal')">Cerrar</button></div><div id="billingRows"></div></div></div>
+<script>
+async function openBillingPanel() {
+  if (!admin) return;
+  openModal('billingModal');
+  const box = document.getElementById('billingRows');
+  box.textContent = 'Cargando publicaciones…';
+  const {data, error} = await db.rpc('j360_billing_panel');
+  if (error) { box.textContent = error.message; return; }
+  box.replaceChildren();
+  const format = value => new Date(value).toLocaleString('es-DO', {timeZone:'America/Santo_Domingo', dateStyle:'medium',timeStyle:'short'});
+  for (const row of data) {
+    const card = document.createElement('section');
+    card.style.cssText = 'padding:14px 0;border-bottom:1px solid #ddd';
+    const title = document.createElement('strong');
+    title.textContent = row.title;
+    const state = document.createElement('p');
+    state.textContent = row.term_status + (row.fee ? ' · RD$' + row.fee.toLocaleString('es-DO') + ' al mes' : ' · Sin cobro');
+    card.append(title,state);
+    if(row.started_at && row.fee) {
+      const dates = document.createElement('p');
+      dates.textContent = 'Inicio: ' + format(row.started_at) + ' · Vencimiento: ' + format(row.ends_at);
+      card.append(dates);
+    }
+    if(row.term_status==='Vencido') {
+      const button = document.createElement('button');
+      button.className='btn btn-green';
+      button.textContent='Reactivar por un mes';
+      button.onclick=async () => {
+        if(!confirm('¿Confirmas que recibiste RD$' + row.fee.toLocaleString('es-DO') + ' por ' + row.title + '?')) return;
+        button.disabled=true;
+        const result=await db.rpc('j360_reactivate',{listing:row.listing_id,expected_end:row.ends_at});
+        if(result.error) err(result.error); else toast('Pago confirmado. Anuncio reactivado.');
+        await openBillingPanel();
+        await refresh();
+      };
+      card.append(button);
+    }
+    box.append(card);
+  }
+  if(!data.length) box.textContent='Todavía no hay anuncios con plan.';
+}
+</script>
+</body>
 <!-- Republicación de la versión de acceso -->
 </html>
