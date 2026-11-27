@@ -312,11 +312,55 @@ let j360NoticeBusy=false;
 async function j360NoticeRefresh(open=false){const button=document.getElementById("j360NoticeButton");button.hidden=!profile;if(!profile||!db||j360NoticeBusy)return;j360NoticeBusy=true;try{const uid=profile.id;const q=await db.from("j360_listings").select("id,status,data,owner").eq("owner",uid);if(q.error)throw q.error;const rows=q.data||[];const notices=rows.filter(x=>["published","rejected"].includes(x.status)).map(x=>({key:x.id+":"+x.status,text:(x.data?.name||"Publicación")+" · "+(x.status==="published"?"Aprobada":"Rechazada")}));if(admin){const p=await db.from("j360_listings").select("id,data").eq("status","pending");if(!p.error)for(const x of p.data||[])notices.push({key:"pending:"+x.id,text:"Pendiente de aprobación: "+(x.data?.name||"Publicación")});const u=await db.rpc("j360_users");if(!u.error)for(const x of u.data||[])if(!x.allowed&&!x.suspended)notices.push({key:"user:"+x.id,text:"Usuario pendiente de autorización: "+x.email})}if(profile?.id!==uid)return;let seen=[];try{seen=JSON.parse(localStorage.getItem("j360NoticeSeen:"+uid)||"[]")}catch{}const unread=notices.filter(x=>!seen.includes(x.key)).length;button.textContent="🔔 Avisos"+(unread?" ("+unread+")":"");if(open){const box=document.getElementById("j360NoticeList");box.replaceChildren();for(const x of notices){const p=document.createElement("p");p.textContent=x.text;box.append(p)}if(!notices.length)box.textContent="No tienes avisos por ahora.";try{localStorage.setItem("j360NoticeSeen:"+uid,JSON.stringify(notices.map(x=>x.key)))}catch{}button.textContent="🔔 Avisos"}}catch(e){if(open)document.getElementById("j360NoticeList").textContent="No se pudieron cargar los avisos. Intenta nuevamente."}finally{j360NoticeBusy=false}}
 function j360Notices(){openModal("j360NoticeModal");j360NoticeRefresh(true)}
 window.addEventListener("load",()=>{j360NoticeRefresh();setInterval(j360NoticeRefresh,20000)});
-</script><div class="modal-backdrop" id="billingModal"><div class="modal" role="dialog" aria-labelledby="billingTitle"><div class="modal-head"><h2 id="billingTitle">Planes y vencimientos</h2><button class="btn btn-light" onclick="closeModal('billingModal')">Cerrar</button></div><div id="billingRows"></div></div></div>
+</script><div class="modal-backdrop" id="billingModal"><div class="modal" role="dialog" aria-labelledby="billingTitle"><div class="modal-head"><h2 id="billingTitle">Planes y vencimientos</h2><button class="btn btn-light" onclick="closeModal('billingModal')">Cerrar</button></div><details id="paymentHistory"><summary style="cursor:pointer;padding:14px 0;font-weight:bold">Historial de pagos</summary><label>Buscar por correo o teléfono del cliente <input id="paymentClient" type="search"></label><div id="paymentList" aria-live="polite"></div><button type="button" class="btn btn-light" id="morePayments" hidden>Ver más pagos</button></details><div id="billingRows"></div></div></div>
 <script>
+
+let paymentRequest = 0;
+let lastPaymentId = null;
+let searchTimer;
+async function loadPayments(append = false) {
+  const request = ++paymentRequest;
+  const list = document.getElementById('paymentList');
+  const more = document.getElementById('morePayments');
+  more.hidden = true;
+  if (!append) { list.replaceChildren(); lastPaymentId = null; }
+  if (!admin || !document.getElementById('paymentHistory').open) return;
+  const client = document.getElementById('paymentClient').value.trim();
+  let query = db.from('j360_payments').select('id,client_name,listing_title,amount_dop,paid_at,covered_until').order('id',{ascending:false}).limit(21);
+  if (client) query = query.ilike('client_name','%' + client + '%');
+  if (append && lastPaymentId) query = query.lt('id',lastPaymentId);
+  const {data,error} = await query;
+  if (request !== paymentRequest || !admin) return;
+  if (error) { err(error); return; }
+  if (!data.length && !append) { list.textContent = client ? 'Sin pagos para ese cliente.' : 'Todavía no hay pagos confirmados.'; return; }
+  const date = value => new Date(value).toLocaleString('es-DO',{timeZone:'America/Santo_Domingo',dateStyle:'medium',timeStyle:'short'});
+  for (const payment of data.slice(0,20)) {
+    const card = document.createElement('section');
+    card.style.cssText = 'padding:12px 0;border-bottom:1px solid #ddd';
+    const title = document.createElement('strong');
+    title.textContent = payment.client_name;
+    const details = document.createElement('p');
+    details.textContent = payment.listing_title + ' · RD$' + payment.amount_dop.toLocaleString('es-DO');
+    const period = document.createElement('p');
+    period.textContent = 'Pagado el ' + date(payment.paid_at) + ' · Cubre hasta ' + date(payment.covered_until);
+    card.append(title,details,period);
+    list.append(card);
+    lastPaymentId = payment.id;
+  }
+  more.hidden = data.length <= 20;
+}
+document.getElementById('paymentHistory').ontoggle = () => loadPayments();
+document.getElementById('morePayments').onclick = () => loadPayments(true);
+document.getElementById('paymentClient').oninput = () => {
+  ++paymentRequest;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => loadPayments(),200);
+};
+
 async function openBillingPanel() {
   if (!admin) return;
   openModal('billingModal');
+  if (document.getElementById('paymentHistory').open) loadPayments();
   const box = document.getElementById('billingRows');
   box.textContent = 'Cargando publicaciones…';
   const {data, error} = await db.rpc('j360_billing_panel');
